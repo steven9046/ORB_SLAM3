@@ -29,7 +29,7 @@ using namespace std;
 
 void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageFilenamesRGB,
                 vector<string> &vstrImageFilenamesD, vector<double> &vTimestamps);
-
+// ./rgbd_tum /home/ss/ORB_SLAM3/Vocabulary/ORBvoc.txt ./TUM1.yaml /home/ss/Downloads/rgbd_dataset_freiburg1_room ./associations/fr1_room.txt
 int main(int argc, char **argv)
 {
     if(argc != 5)
@@ -59,6 +59,7 @@ int main(int argc, char **argv)
     }
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
+    // 这里有一些ORB-SLAM的设置选项
     ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::RGBD,true);
     float imageScale = SLAM.GetImageScale();
 

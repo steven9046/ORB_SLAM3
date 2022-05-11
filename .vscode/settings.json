@@ -1,0 +1,21 @@
+{
+    "files.associations": {
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "string": "cpp",
+        "typeindex": "cpp",
+        "typeinfo": "cpp",
+        "*.ipp": "cpp",
+        "array": "cpp",
+        "string_view": "cpp",
+        "condition_variable": "cpp",
+        "vector": "cpp",
+        "chrono": "cpp",
+        "cmath": "cpp",
+        "*.tcc": "cpp",
+        "bitset": "cpp",
+        "initializer_list": "cpp",
+        "utility": "cpp",
+        "valarray": "cpp"
+    }
+}

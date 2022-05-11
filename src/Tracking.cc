@@ -40,14 +40,43 @@ using namespace std;
 namespace ORB_SLAM3
 {
 
-
+/**
+ * @brief 构造函数， 这个构造函数没有干什么事情
+ * @param[in] pSys          SLAM系统指针
+ * @param[in] pMapDrawer    地图绘制器
+ * @param[in] pViewer       可视化
+ * @param[in] pAtlas        地图
+ * @param[in] pKFDB         关键帧数据库 
+ * 
+ * 1. 加载配置文件
+ * 
+ */
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Atlas *pAtlas, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, Settings* settings, const string &_nameSeq):
-    mState(NO_IMAGES_YET), mSensor(sensor), mTrackedFr(0), mbStep(false),
-    mbOnlyTracking(false), mbMapUpdated(false), mbVO(false), mpORBVocabulary(pVoc), mpKeyFrameDB(pKFDB),
-    mbReadyToInitializate(false), mpSystem(pSys), mpViewer(NULL), bStepByStep(false),
-    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpAtlas(pAtlas), mnLastRelocFrameId(0), time_recently_lost(5.0),
-    mnInitialFrameId(0), mbCreatedMap(false), mnFirstFrameId(0), mpCamera2(nullptr), mpLastKeyFrame(static_cast<KeyFrame*>(NULL))
+    mState(NO_IMAGES_YET),          // 初始状态为无图像
+    mSensor(sensor),                // 传感器类型, 后边会根据类型进行不同操作
+    mTrackedFr(0),                  // 跟踪到的帧数
+    mbStep(false),                  
+    mbOnlyTracking(false),          // 只进行跟踪
+    mbMapUpdated(false),            // 地图更新标志
+    mbVO(false), 
+    mpORBVocabulary(pVoc), 
+    mpKeyFrameDB(pKFDB),
+    mbReadyToInitializate(false), 
+    mpSystem(pSys), 
+    mpViewer(NULL), 
+    bStepByStep(false),
+    mpFrameDrawer(pFrameDrawer), 
+    mpMapDrawer(pMapDrawer), 
+    mpAtlas(pAtlas), 
+    mnLastRelocFrameId(0), 
+    time_recently_lost(5.0),
+    mnInitialFrameId(0), 
+    mbCreatedMap(false), 
+    mnFirstFrameId(0), 
+    mpCamera2(nullptr), 
+    mpLastKeyFrame(static_cast<KeyFrame*>(NULL))
 {
+    // 1. 加载配置文件
     // Load camera parameters from settings file
     if(settings){
         newParameterLoader(settings);
@@ -98,6 +127,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mbInitWith3KFs = false;
     mnNumDataset = 0;
 
+    // 这里可以配置多个相机？？ 输出相机信息
     vector<GeometricCamera*> vpCams = mpAtlas->GetAllCameras();
     std::cout << "There are " << vpCams.size() << " cameras in the atlas" << std::endl;
     for(GeometricCamera* pCam : vpCams)
@@ -546,12 +576,15 @@ void Tracking::newParameterLoader(Settings *settings) {
     //TODO: missing image scaling and rectification
     mImageScale = 1.0f;
 
+    // 设置相机内参fx fy cx cy
+    // OpenCv矩阵
     mK = cv::Mat::eye(3,3,CV_32F);
     mK.at<float>(0,0) = mpCamera->getParameter(0);
     mK.at<float>(1,1) = mpCamera->getParameter(1);
     mK.at<float>(0,2) = mpCamera->getParameter(2);
     mK.at<float>(1,2) = mpCamera->getParameter(3);
 
+    // Eigen矩阵
     mK_.setIdentity();
     mK_(0,0) = mpCamera->getParameter(0);
     mK_(1,1) = mpCamera->getParameter(1);
@@ -569,10 +602,12 @@ void Tracking::newParameterLoader(Settings *settings) {
     }
 
     if(mSensor==System::STEREO || mSensor==System::RGBD || mSensor==System::IMU_STEREO || mSensor==System::IMU_RGBD ){
+        // 应该是基线
         mbf = settings->bf();
         mThDepth = settings->b() * settings->thDepth();
     }
 
+    // 如果是RGBD相机
     if(mSensor==System::RGBD || mSensor==System::IMU_RGBD){
         mDepthMapFactor = settings->depthMapFactor();
         if(fabs(mDepthMapFactor)<1e-5)
@@ -586,12 +621,13 @@ void Tracking::newParameterLoader(Settings *settings) {
     mbRGB = settings->rgb();
 
     //ORB parameters
-    int nFeatures = settings->nFeatures();
-    int nLevels = settings->nLevels();
-    int fIniThFAST = settings->initThFAST();
-    int fMinThFAST = settings->minThFAST();
-    float fScaleFactor = settings->scaleFactor();
+    int nFeatures = settings->nFeatures(); // Number of features per image 
+    int nLevels = settings->nLevels(); // Number of levels in the scale pyramid
+    int fIniThFAST = settings->initThFAST(); // Initial threshold for the FAST corner detector
+    int fMinThFAST = settings->minThFAST(); // Minimum threshold for the FAST corner detector
+    float fScaleFactor = settings->scaleFactor(); // Scale factor between levels in the scale pyramid
 
+    // 创建ORB特征提取器
     mpORBextractorLeft = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
     if(mSensor==System::STEREO || mSensor==System::IMU_STEREO)
@@ -1516,12 +1552,17 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     return mCurrentFrame.GetPose();
 }
 
-
+/**
+ * @brief 制作frame,并进行track()
+ * @param imRGB RGB   图片
+ * @param imD   Depth 图片
+ */
 Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp, string filename)
 {
     mImGray = imRGB;
     cv::Mat imDepth = imD;
 
+    // 转成灰度图
     if(mImGray.channels()==3)
     {
         if(mbRGB)
@@ -1537,9 +1578,11 @@ Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, co
             cvtColor(mImGray,mImGray,cv::COLOR_BGRA2GRAY);
     }
 
+    // 深度图也要转换?
     if((fabs(mDepthMapFactor-1.0f)>1e-5) || imDepth.type()!=CV_32F)
         imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
 
+    // 构造Frame
     if (mSensor == System::RGBD)
         mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
     else if(mSensor == System::IMU_RGBD)
@@ -1556,6 +1599,7 @@ Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, co
 #ifdef REGISTER_TIMES
     vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
 #endif
+
 
     Track();
 

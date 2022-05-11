@@ -197,6 +197,12 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     AssignFeaturesToGrid();
 }
 
+/**
+ * @brief  RGBD Frame 构造函数
+ * 1. Frame ID
+ * 2. 提取ORB特征放入 mDescriptors
+ * 3. 
+ */
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
@@ -415,6 +421,13 @@ void Frame::AssignFeaturesToGrid()
     }
 }
 
+/**
+ * @brief 提取ORB特征
+ * @param [in] flag 是否是左目图像
+ * @param [in] im   图像
+ * @param [in] x0   图像左上角坐标x
+ * @param [in] x1   图像左上角坐标y
+ */
 void Frame::ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1)
 {
     vector<int> vLapping = {x0,x1};
@@ -753,6 +766,7 @@ void Frame::UndistortKeyPoints()
     }
 
     // Fill matrix with points
+    // Nx2
     cv::Mat mat(N,2,CV_32F);
 
     for(int i=0; i<N; i++)

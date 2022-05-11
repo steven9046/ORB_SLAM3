@@ -32,10 +32,18 @@ using namespace std;
 
 namespace ORB_SLAM3 {
 
+    /**
+     * @brief 
+     * @param fSettings 文件
+     * @param name      key
+     * 
+     */
     template<>
     float Settings::readParameter<float>(cv::FileStorage& fSettings, const std::string& name, bool& found, const bool required){
         cv::FileNode node = fSettings[name];
+        // 如果配置文件里没有这个key
         if(node.empty()){
+            // 是否必要
             if(required){
                 std::cerr << name << " required parameter does not exist, aborting..." << std::endl;
                 exit(-1);
@@ -124,6 +132,12 @@ namespace ORB_SLAM3 {
         }
     }
 
+    /**
+     * @brief 构造函数，通过调用各种read来从config文件里加载
+     * 1. 打开配置文件
+     * 2. 读取1号相机参数
+     * 
+     */
     Settings::Settings(const std::string &configFile, const int& sensor) :
     bNeedToUndistort_(false), bNeedToRectify_(false), bNeedToResize1_(false), bNeedToResize2_(false) {
         sensor_ = sensor;
@@ -181,6 +195,12 @@ namespace ORB_SLAM3 {
         cout << "----------------------------------" << endl;
     }
 
+    /**
+     * @brief 
+     * 1. 读取相机模型类型 pinhole，并构造相应相机模型，pinhole相机模型主要就是四个相机参数
+     * 2. 
+     * 
+     */
     void Settings::readCamera1(cv::FileStorage &fSettings) {
         bool found;
 
@@ -221,7 +241,7 @@ namespace ORB_SLAM3 {
 
             //Check if we need to correct distortion from the images
             if((sensor_ == System::MONOCULAR || sensor_ == System::IMU_MONOCULAR) && vPinHoleDistorsion1_.size() != 0){
-                bNeedToUndistort_ = true;
+                bNeedT++oUndistort_ = true;
             }
         }
         else if(cameraModel == "Rectified"){
@@ -431,11 +451,14 @@ namespace ORB_SLAM3 {
         }
     }
 
+    // 从配置文件读取RGBD参数
     void Settings::readRGBD(cv::FileStorage& fSettings) {
         bool found;
-
+        // DepthMapFactor = 5000.0
         depthMapFactor_ = readParameter<float>(fSettings,"RGBD.DepthMapFactor",found);
+        // ThDepth = 40.0
         thDepth_ = readParameter<float>(fSettings,"Stereo.ThDepth",found);
+        // b = 0.07732 ， 基线？
         b_ = readParameter<float>(fSettings,"Stereo.b",found);
         bf_ = b_ * calibration1_->getParameter(0);
     }
@@ -469,9 +492,10 @@ namespace ORB_SLAM3 {
             imageViewerScale_ = 1.0f;
     }
 
+    // 保存加载选项
     void Settings::readLoadAndSave(cv::FileStorage &fSettings) {
         bool found;
-
+        // string 文件名                                                               不是必须
         sLoadFrom_ = readParameter<string>(fSettings,"System.LoadAtlasFromFile",found,false);
         sSaveto_ = readParameter<string>(fSettings,"System.SaveAtlasToFile",found,false);
     }

@@ -38,6 +38,18 @@ namespace ORB_SLAM3
 
 Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 
+
+/**
+ * @brief 构造SLAM
+ * 1. 创建 setting，加载配置文件
+ * 2. 创建 ORB 字典，加载字典文件
+ * 3. 创建关键帧数据集
+ * 4. 创建地图集
+ * 5. 创建 tracking (主线程)
+ * 6. 创建 LocalMapping 线程
+ * 7. 创建 LoopClosing 线程
+ * 8. 创建 可视化 线程
+ */
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer, const int initFr, const string &strSequence):
     mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false), mbResetActiveMap(false),
@@ -67,13 +79,15 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << "RGB-D-Inertial" << endl;
 
     //Check settings file
+    // 这东西是用来序列化yaml的
     cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
        cerr << "Failed to open settings file at: " << strSettingsFile << endl;
        exit(-1);
     }
-
+    
+    // 1. 通过yaml文件构造setting
     cv::FileNode node = fsSettings["File.version"];
     if(!node.empty() && node.isString() && node.string() == "1.0"){
         settings_ = new Settings(strSettingsFile,mSensor);
@@ -98,6 +112,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         }
     }
 
+    // 闭环检测
     node = fsSettings["loopClosing"];
     bool activeLC = true;
     if(!node.empty())
@@ -109,11 +124,13 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     bool loadedAtlas = false;
 
+    // 不加载地图走这里
     if(mStrLoadAtlasFromFile.empty())
     {
         //Load ORB Vocabulary
         cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
-
+        
+        // 2. 构造 ORB 字典
         mpVocabulary = new ORBVocabulary();
         bool bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
         if(!bVocLoad)
@@ -124,9 +141,11 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         }
         cout << "Vocabulary loaded!" << endl << endl;
 
+        // 3. 创建关键帧数据集
         //Create KeyFrame Database
         mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
+        // 4. 创建地图集
         //Create the Atlas
         cout << "Initialization of Atlas from scratch " << endl;
         mpAtlas = new Atlas(0);
@@ -177,11 +196,12 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         //usleep(10*1000*1000);
     }
 
-
+    // 设置陀螺仪
     if (mSensor==IMU_STEREO || mSensor==IMU_MONOCULAR || mSensor==IMU_RGBD)
         mpAtlas->SetInertialSensor();
 
-    //Create Drawers. These are used by the Viewer
+    // 可视化用的
+    // Create Drawers. These are used by the Viewer
     mpFrameDrawer = new FrameDrawer(mpAtlas);
     mpMapDrawer = new MapDrawer(mpAtlas, strSettingsFile, settings_);
 
@@ -195,6 +215,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpLocalMapper = new LocalMapping(this, mpAtlas, mSensor==MONOCULAR || mSensor==IMU_MONOCULAR,
                                      mSensor==IMU_MONOCULAR || mSensor==IMU_STEREO || mSensor==IMU_RGBD, strSequence);
     mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run,mpLocalMapper);
+    
     mpLocalMapper->mInitFr = initFr;
     if(settings_)
         mpLocalMapper->mThFarPoints = settings_->thFarPoints();
@@ -325,6 +346,15 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
     return Tcw;
 }
 
+/**
+ * @brief 主线程主函数， 主要是 GrabImageRGBD 这个函数能计算相机位姿
+ * @param im        rgb图像
+ * @param depthmap  depth图像
+ * @param timestamp 时间戳
+ * @param vImuMeas  IMU测量   默认为空
+ * @param filename  图像文件名 默认为空
+ * @return Tcw      当前帧相对于初始帧的位姿
+ */
 Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp, const vector<IMU::Point>& vImuMeas, string filename)
 {
     if(mSensor!=RGBD  && mSensor!=IMU_RGBD)
@@ -333,8 +363,11 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
         exit(-1);
     }
 
+    // 数据深拷贝
     cv::Mat imToFeed = im.clone();
     cv::Mat imDepthToFeed = depthmap.clone();
+
+    // 是否需要resize
     if(settings_ && settings_->needToResize()){
         cv::Mat resizedIm;
         cv::resize(im,resizedIm,settings_->newImSize());
@@ -343,6 +376,7 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
         cv::resize(depthmap,imDepthToFeed,settings_->newImSize());
     }
 
+    // 是否切换到定位模式
     // Check mode change
     {
         unique_lock<mutex> lock(mMutexMode);
@@ -367,6 +401,7 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
         }
     }
 
+    // 是否重置
     // Check reset
     {
         unique_lock<mutex> lock(mMutexReset);
@@ -383,10 +418,12 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
         }
     }
 
+    // 是否添加IMU测量
     if (mSensor == System::IMU_RGBD)
         for(size_t i_imu = 0; i_imu < vImuMeas.size(); i_imu++)
             mpTracker->GrabImuData(vImuMeas[i_imu]);
 
+    // 计算相机位姿
     Sophus::SE3f Tcw = mpTracker->GrabImageRGBD(imToFeed,imDepthToFeed,timestamp,filename);
 
     unique_lock<mutex> lock2(mMutexState);
