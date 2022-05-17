@@ -26,8 +26,12 @@
 #include <Eigen/Geometry>
 #include <include/CameraModels/GeometricCamera.h>
 
-
+/**
+ * @brief 这些都是他自己定义的可优化类型
+ * 
+ */
 namespace ORB_SLAM3 {
+// 一元边，特征点和帧位姿的联系
 class  EdgeSE3ProjectXYZOnlyPose: public  g2o::BaseUnaryEdge<2, Eigen::Vector2d, g2o::VertexSE3Expmap>{
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -38,10 +42,12 @@ public:
 
     bool write(std::ostream& os) const;
 
+    // 误差函数 r*xyz + t;
     void computeError()  {
         const g2o::VertexSE3Expmap* v1 = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
         Eigen::Vector2d obs(_measurement);
-        _error = obs-pCamera->project(v1->estimate().map(Xw));
+        // 
+        _error = obs-pCamera->project(v1->estimate().map(Xw));//  r*Xw + t
     }
 
     bool isDepthPositive() {
@@ -52,6 +58,7 @@ public:
 
     virtual void linearizeOplus();
 
+    // 
     Eigen::Vector3d Xw;
     GeometricCamera* pCamera;
 };

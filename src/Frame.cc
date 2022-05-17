@@ -326,6 +326,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     if(mvKeys.empty())
         return;
 
+    // 对特征点进行畸变校正
     UndistortKeyPoints();
 
     // Set no stereo information
@@ -387,7 +388,14 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mpMutexImu = new std::mutex();
 }
 
-
+/*****************************************************************
+*      函数属性：类Frame的成员函数AssignFeaturesToGrid()
+ *     函数功能：
+ *                 将整张图片分为64×48的网格
+ *                 并将每个特征点的id加入到该网格中，即mGrid容器存储的是特征点的id
+ *     函数参数介绍：NULL
+ *     备注：分配特征点到各个网格，加速特征匹配
+ ******************************************************************/
 void Frame::AssignFeaturesToGrid()
 {
     // Fill matrix with points

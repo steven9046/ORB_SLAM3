@@ -1556,6 +1556,8 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
  * @brief 制作frame,并进行track()
  * @param imRGB RGB   图片
  * @param imD   Depth 图片
+ * 1. 创建Frame, 此过程中会提取ORB特征，并进行分配，以便加速匹配
+ * 2. 
  */
 Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp, string filename)
 {
@@ -1837,7 +1839,7 @@ void Tracking::ResetFrameIMU()
 
 void Tracking::Track()
 {
-
+    // 不知道这个flag作用
     if (bStepByStep)
     {
         std::cout << "Tracking: Waiting to the next step" << std::endl;
@@ -1845,7 +1847,8 @@ void Tracking::Track()
             usleep(500);
         mbStep = false;
     }
-
+    
+    // IMU挂了
     if(mpLocalMapper->mbBadImu)
     {
         cout << "TRACK: Reset map because local mapper set the bad imu flag " << endl;
@@ -1853,6 +1856,7 @@ void Tracking::Track()
         return;
     }
 
+    // 拿到当前地图
     Map* pCurrentMap = mpAtlas->GetCurrentMap();
     if(!pCurrentMap)
     {
@@ -1973,6 +1977,7 @@ void Tracking::Track()
         std::chrono::steady_clock::time_point time_StartPosePred = std::chrono::steady_clock::now();
 #endif
 
+        // 使用运动模型初始化相机位姿(优化的起点)
         // Initial camera pose estimation using motion model or relocalization (if tracking is lost)
         if(!mbOnlyTracking)
         {
@@ -1991,11 +1996,11 @@ void Tracking::Track()
                     Verbose::PrintMess("TRACK: Track with respect to the reference KF ", Verbose::VERBOSITY_DEBUG);
                     bOK = TrackReferenceKeyFrame();
                 }
-                else
+                else // 通过运动模型进行初始化
                 {
                     Verbose::PrintMess("TRACK: Track with motion model", Verbose::VERBOSITY_DEBUG);
                     bOK = TrackWithMotionModel();
-                    if(!bOK)
+                    if(!bOK) // 如果运动模型失效，则使用关键帧进行追踪
                         bOK = TrackReferenceKeyFrame();
                 }
 
@@ -2346,6 +2351,9 @@ void Tracking::Track()
         // Store frame pose information to retrieve the complete camera trajectory afterwards.
         if(mCurrentFrame.isSet())
         {
+            // 关键帧的Pose的逆 mTwc0
+            // Tc1w * mTwc0 = Tc1c0
+            // 当前帧 到 关键帧的 transform
             Sophus::SE3f Tcr_ = mCurrentFrame.GetPose() * mCurrentFrame.mpReferenceKF->GetPoseInverse();
             mlRelativeFramePoses.push_back(Tcr_);
             mlpReferences.push_back(mCurrentFrame.mpReferenceKF);
@@ -2822,19 +2830,28 @@ bool Tracking::TrackReferenceKeyFrame()
         return nmatchesMap>=10;
 }
 
+/**
+ * @brief 更新上一帧的相关信息
+ * 1. 位姿 Pose
+ * 2. 特征点
+ */
 void Tracking::UpdateLastFrame()
 {
     // Update pose according to reference keyframe
     KeyFrame* pRef = mLastFrame.mpReferenceKF;
+    // 当前帧到参考关键帧的transform
     Sophus::SE3f Tlr = mlRelativeFramePoses.back();
+    // 上一帧的Pose Tc1c0 * Tc0w = Tc1w
     mLastFrame.SetPose(Tlr * pRef->GetPose());
-
+    
     if(mnLastKeyFrameId==mLastFrame.mnId || mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR || !mbOnlyTracking)
         return;
 
     // Create "visual odometry" MapPoints
     // We sort points according to their measured depth by the stereo/RGB-D sensor
+    //         深度值 特征点id
     vector<pair<float,int> > vDepthIdx;
+    // 左目相机提取出的特征点数量
     const int Nfeat = mLastFrame.Nleft == -1? mLastFrame.N : mLastFrame.Nleft;
     vDepthIdx.reserve(Nfeat);
     for(int i=0; i<Nfeat;i++)
@@ -2849,8 +2866,10 @@ void Tracking::UpdateLastFrame()
     if(vDepthIdx.empty())
         return;
 
+    // 按照深度值排序
     sort(vDepthIdx.begin(),vDepthIdx.end());
 
+    // 找到100个比较近的特征点
     // We insert all close points (depth<mThDepth)
     // If less than 100 close points, we insert the 100 closest ones.
     int nPoints = 0;
@@ -2867,17 +2886,17 @@ void Tracking::UpdateLastFrame()
         else if(pMP->Observations()<1)
             bCreateNew = true;
 
+        // 是否要创建新的MapPoint
         if(bCreateNew)
         {
             Eigen::Vector3f x3D;
-
             if(mLastFrame.Nleft == -1){
                 mLastFrame.UnprojectStereo(i, x3D);
             }
             else{
                 x3D = mLastFrame.UnprojectStereoFishEye(i);
             }
-
+            // x3D设置为worldpos
             MapPoint* pNewMP = new MapPoint(x3D,mpAtlas->GetCurrentMap(),&mLastFrame,i);
             mLastFrame.mvpMapPoints[i]=pNewMP;
 
@@ -2888,13 +2907,24 @@ void Tracking::UpdateLastFrame()
         {
             nPoints++;
         }
-
+        // 终止条件
         if(vDepthIdx[j].first>mThDepth && nPoints>100)
             break;
 
     }
 }
 
+/**
+ * @brief 
+ * 1. 更新上一帧信息(补充地图点)
+ * 2. 设置当前帧位姿(恒速模型)
+ * 3. 特征点匹配(通过重投影缩小匹配范围，快速找到匹配特征点对)
+ * 4. 位置优化(通过上一步匹配得到匹配成功的地图点，该地图点在当前帧里有对应的特征点像素坐标，该地图点重投影也可以得到一个像素坐标，这两个像素坐标之间的距离就是误差)
+ *    优化图: 
+ *          顶点为相机位姿SE3
+ *          误差边为上边求得的那个冲投影误差
+ *    (相当于根据匹配到的特征点调整相机位姿)
+ */
 bool Tracking::TrackWithMotionModel()
 {
     ORBmatcher matcher(0.9,true);
@@ -2902,21 +2932,22 @@ bool Tracking::TrackWithMotionModel()
     // Update last frame pose according to its reference keyframe
     // Create "visual odometry" points if in Localization Mode
     UpdateLastFrame();
-
+    
+    // 根据IMU预测当前帧位姿
     if (mpAtlas->isImuInitialized() && (mCurrentFrame.mnId>mnLastRelocFrameId+mnFramesToResetIMU))
     {
         // Predict state with IMU if it is initialized and it doesnt need reset
         PredictStateIMU();
         return true;
     }
-    else
-    {
+    // 跟踪恒速模型预测当前帧位姿
+    else{
         mCurrentFrame.SetPose(mVelocity * mLastFrame.GetPose());
     }
 
 
 
-
+    // 初始化地图点(地图点就是特征点的3D坐标)
     fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
 
     // Project points seen in previous frame
@@ -2927,6 +2958,7 @@ bool Tracking::TrackWithMotionModel()
     else
         th=15;
 
+    // 特征点匹配(根据前一帧的MapPoints重投影，然后在投影点的一定范围内进行ORB特征匹配，生成当前帧的MapPoints)
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
 
     // If few matches, uses a wider window search

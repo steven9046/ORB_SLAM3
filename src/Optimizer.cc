@@ -166,7 +166,7 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
                 Eigen::Matrix<double,2,1> obs;
                 obs << kpUn.pt.x, kpUn.pt.y;
 
-                ORB_SLAM3::EdgeSE3ProjectXYZ* e = new ORB_SLAM3::EdgeSE3ProjectXYZ();
+                ORB_SLAM3::EdgeSE3ProjectXYZ* e = new OmvKeysUnRB_SLAM3::EdgeSE3ProjectXYZ();
 
                 e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
                 e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKF->mnId)));
@@ -810,7 +810,10 @@ void Optimizer::FullInertialBA(Map *pMap, int its, const bool bFixLocal, const l
     pMap->IncreaseChangeIndex();
 }
 
-
+/**
+ * @brief 对位姿进行优化求解
+ * 
+ */
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
     g2o::SparseOptimizer optimizer;
@@ -819,15 +822,19 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
 
     g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
-
+    // 选择优化算法
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     optimizer.setAlgorithm(solver);
 
     int nInitialCorrespondences=0;
 
     // Set Frame vertex
-    g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-    Sophus::SE3<float> Tcw = pFrame->GetPose();
+    // 设立应该是se3->SE3的映射Expmap
+    g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap(); // 
+    Sophus::SE3<float> Tcw = pFrame->GetPose(); // 得到变换矩阵
+    // 这里SE3Quat应该是因为se3的旋转和so3的映射不一样,so3里应该只需要设置一个四元数
+    // se3里的quat是一个四元数加一个平移向量
+    // 这里setEstimate函数只是把数据传进去
     vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(),Tcw.translation().cast<double>()));
     vSE3->setId(0);
     vSE3->setFixed(false);
@@ -869,25 +876,40 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     pFrame->mvbOutlier[i] = false;
 
                     Eigen::Matrix<double,2,1> obs;
+                    // mvKeysUn mvKeys去畸变以后得到这个
+                    // mvKeys 是ORB特征提取的时候得到的特征点
                     const cv::KeyPoint &kpUn = pFrame->mvKeysUn[i];
+                    // 这东西就是特征点的像素坐标啊
                     obs << kpUn.pt.x, kpUn.pt.y;
-
+                    
+                    // 没弄明白这个边优化的是什么误差函数
+                    // 里边有一个函数 computeError 用到了 Xw world pos,生成地图点时会设置这个
+                    // 这个 world pos 是特征点的3D坐标，这里应该是又给投影成了像素坐标
+                    // 然后算这两个像素坐标的误差
+                    // 相当于计算了一个重投影，然后特征匹配又得到一个结果，这两个结果间的误差
+                    // 这里就是优化了一个重投影误差
                     ORB_SLAM3::EdgeSE3ProjectXYZOnlyPose* e = new ORB_SLAM3::EdgeSE3ProjectXYZOnlyPose();
-
+                    
+                    // 只连接一个定点
                     e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
                     e->setMeasurement(obs);
+
+                    // 信息矩阵，不同尺度不一样
                     const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
                     e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
 
+                    // 鲁棒核
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                     e->setRobustKernel(rk);
                     rk->setDelta(deltaMono);
 
                     e->pCamera = pFrame->mpCamera;
+                    // 这个是在设置什么?
                     e->Xw = pMP->GetWorldPos().cast<double>();
 
                     optimizer.addEdge(e);
-
+                    
+                    // 单目
                     vpEdgesMono.push_back(e);
                     vnIndexEdgeMono.push_back(i);
                 }

@@ -58,7 +58,8 @@ namespace g2o {
       SE3Quat(const Matrix3d& R, const Vector3d& t):_r(Quaterniond(R)),_t(t){ 
         normalizeRotation();
       }
-
+      
+      // 程序里用的这种构造函数
       SE3Quat(const Quaterniond& q, const Vector3d& t):_r(q),_t(t){
         normalizeRotation();
       }

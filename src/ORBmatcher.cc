@@ -1673,25 +1673,38 @@ namespace ORB_SLAM3
         return nFound;
     }
 
+    /**
+     * @brief 运行这个
+     * @param th        阈值
+     * @param bMono     是否是单目
+     * 1. 把上一帧的MapPoints投影到当前帧的图像平面上
+     * 2. 按照一个半径在当前帧图像中搜索描述子，找到一个最佳匹配
+     *    结果是当前帧的MapPoint有了内容(匹配到的上一帧的MapPoint)
+     *    这样MapPoint会越来越少，所以需要updatelastFrame来增加MapPoints
+     */
     int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
     {
         int nmatches = 0;
 
+        /*** 1. 投影到当前帧  ***/
         // Rotation Histogram (to check rotation consistency)
         vector<int> rotHist[HISTO_LENGTH];
         for(int i=0;i<HISTO_LENGTH;i++)
             rotHist[i].reserve(500);
         const float factor = 1.0f/HISTO_LENGTH;
-
+        
+        // 当前帧的位姿
         const Sophus::SE3f Tcw = CurrentFrame.GetPose();
         const Eigen::Vector3f twc = Tcw.inverse().translation();
-
+        // 上一帧的位姿
         const Sophus::SE3f Tlw = LastFrame.GetPose();
         const Eigen::Vector3f tlc = Tlw * twc;
 
         const bool bForward = tlc(2)>CurrentFrame.mb && !bMono;
         const bool bBackward = -tlc(2)>CurrentFrame.mb && !bMono;
-
+        
+        /*** 2. 寻找最佳匹配  ***/
+        // 遍历上一帧中的MapPoint点
         for(int i=0; i<LastFrame.N; i++)
         {
             MapPoint* pMP = LastFrame.mvpMapPoints[i];
@@ -1699,7 +1712,13 @@ namespace ORB_SLAM3
             {
                 if(!LastFrame.mvbOutlier[i])
                 {
-                    // Project
+                    // 把地图点投影到当前帧，求得像素坐标
+                    /**
+                     * 以下是三维世界中的MapPoint点到像素坐标的计算过程
+                     * 1.世界坐标-->相机坐标；
+                     * 2.相机坐标-->相机归一化平面坐标；
+                     * 3.相机归一化平面坐标-->像素坐标；
+                     */
                     Eigen::Vector3f x3Dw = pMP->GetWorldPos();
                     Eigen::Vector3f x3Dc = Tcw * x3Dw;
 
@@ -1709,14 +1728,21 @@ namespace ORB_SLAM3
 
                     if(invzc<0)
                         continue;
-
+                    /**
+                     * X/Z = X * 1/Z = xc * invzc
+                     * Y/Z = Y * 1/Z = yc * invzc
+                     * u,v的计算公式如下：
+                     * u = fx * X/Z + cx
+                     * v = fy * Y/Z + cy
+                     */
                     Eigen::Vector2f uv = CurrentFrame.mpCamera->project(x3Dc);
-
+                    // 检查是否在图像内
                     if(uv(0)<CurrentFrame.mnMinX || uv(0)>CurrentFrame.mnMaxX)
                         continue;
                     if(uv(1)<CurrentFrame.mnMinY || uv(1)>CurrentFrame.mnMaxY)
                         continue;
 
+                    //octave就是该关键点所在金字塔中哪个层
                     int nLastOctave = (LastFrame.Nleft == -1 || i < LastFrame.Nleft) ? LastFrame.mvKeys[i].octave
                                                                                      : LastFrame.mvKeysRight[i - LastFrame.Nleft].octave;
 
@@ -1735,11 +1761,13 @@ namespace ORB_SLAM3
                     if(vIndices2.empty())
                         continue;
 
+                    // 获取这个地图点的描述子
                     const cv::Mat dMP = pMP->GetDescriptor();
 
                     int bestDist = 256;
                     int bestIdx2 = -1;
 
+                    // 在搜索窗口里找到当前图像中最匹配的特征点
                     for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
                     {
                         const size_t i2 = *vit;
@@ -1766,9 +1794,11 @@ namespace ORB_SLAM3
                             bestIdx2=i2;
                         }
                     }
-
+                    
+                    // 如果最佳匹配距离小于阈值，则认为匹配成功
                     if(bestDist<=TH_HIGH)
                     {
+                        // 当前帧的地图点直接就用上一帧的地图点
                         CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
                         nmatches++;
 
@@ -1791,7 +1821,12 @@ namespace ORB_SLAM3
                             rotHist[bin].push_back(bestIdx2);
                         }
                     }
+
+                    // 如果当前帧的左目匹配点数目不为-1(正常匹配就不为-1)
+                    // 这个是双目的情况？？ RGB相机的帧上来就把这个设置为-1了
                     if(CurrentFrame.Nleft != -1){
+                        
+                        // 把这个地图点又转换到哪个坐标系？
                         Eigen::Vector3f x3Dr = CurrentFrame.GetRelativePoseTrl() * x3Dc;
                         Eigen::Vector2f uv = CurrentFrame.mpCamera->project(x3Dr);
 

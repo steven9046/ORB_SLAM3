@@ -271,6 +271,7 @@ public:
     static long unsigned int nNextId;
     long unsigned int mnId;
 
+    // 参考关键帧
     // Reference Keyframe.
     KeyFrame* mpReferenceKF;
 
