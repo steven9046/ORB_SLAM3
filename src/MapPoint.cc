@@ -320,12 +320,24 @@ void MapPoint::IncreaseFound(int n)
     mnFound+=n;
 }
 
+/**
+ * @brief 实际能够发生匹配的帧数与可以发生匹配的帧数的比值。
+ * mnFound      图优化时的内点才算真正匹配上了
+ * mnVisible    地图点可以投影到某个帧上就会+1，所以是可以发生匹配的帧数量
+ */
 float MapPoint::GetFoundRatio()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return static_cast<float>(mnFound)/mnVisible;
 }
 
+/**
+ * @brief 
+ * 由于一个MapPoint会被许多相机观测到，因此在插入关键帧后，需要判断是否更新当前点的最适合的描述子。
+ * 最好的描述子与其他描述子应该具有最小的平均距离，因此先获得当前点的所有描述子，然后计算描述子之间的两两距离，
+ * 对所有距离取平均，最后找离这个中值距离最近的描述子。
+ * 最后是更新了这个 mDescriptor;
+ */
 void MapPoint::ComputeDistinctiveDescriptors()
 {
     // Retrieve all observed descriptors
@@ -345,6 +357,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
 
     vDescriptors.reserve(observations.size());
 
+    // 遍历所有观测，拿出所有描述子
     for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
@@ -367,7 +380,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
 
     // Compute distances between them
     const size_t N = vDescriptors.size();
-
+    // i和i+1的距离，不是两两间的距离
     float Distances[N][N];
     for(size_t i=0;i<N;i++)
     {
@@ -385,8 +398,11 @@ void MapPoint::ComputeDistinctiveDescriptors()
     int BestIdx = 0;
     for(size_t i=0;i<N;i++)
     {
+        // 这里意思是取一行(Distances[i] 到 Distances[i]+N )生成新的 vector
+        // 就是第 i 个描述子与其他描述子的距离
         vector<int> vDists(Distances[i],Distances[i]+N);
         sort(vDists.begin(),vDists.end());
+        // 找到到其他描述子的中间距离
         int median = vDists[0.5*(N-1)];
 
         if(median<BestMedian)
@@ -423,8 +439,16 @@ bool MapPoint::IsInKeyFrame(KeyFrame *pKF)
     return (mObservations.count(pKF));
 }
 
+/**
+ * @brief 更新平均观测方向
+ * 1. 平均观测方向
+ *      每一帧的观测方向为normali :  Pos - Owi; 都是世界坐标系，Pos是地图点的坐标，Owi是相机中心坐标
+ *      再进行归一化变为单位向量，之后所有帧的观测方向求平均
+ * 2. 计算观测距离范围，但是这个范围有什么用不太清楚
+ */
 void MapPoint::UpdateNormalAndDepth()
 {
+    //  关键帧       观测到的次数
     map<KeyFrame*,tuple<int,int>> observations;
     KeyFrame* pRefKF;
     Eigen::Vector3f Pos;
@@ -434,7 +458,7 @@ void MapPoint::UpdateNormalAndDepth()
         if(mbBad)
             return;
         observations = mObservations;
-        pRefKF = mpRefKF;
+        pRefKF = mpRefKF; 
         Pos = mWorldPos;
     }
 
@@ -444,6 +468,7 @@ void MapPoint::UpdateNormalAndDepth()
     Eigen::Vector3f normal;
     normal.setZero();
     int n=0;
+    // 遍历所有观测到此地图点的关键帧
     for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
@@ -453,6 +478,7 @@ void MapPoint::UpdateNormalAndDepth()
 
         if(leftIndex != -1){
             Eigen::Vector3f Owi = pKF->GetCameraCenter();
+            // 这个是向量
             Eigen::Vector3f normali = Pos - Owi;
             normal = normal + normali / normali.norm();
             n++;
@@ -464,7 +490,7 @@ void MapPoint::UpdateNormalAndDepth()
             n++;
         }
     }
-
+    // 到当前关键帧的观测距离
     Eigen::Vector3f PC = Pos - pRefKF->GetCameraCenter();
     const float dist = PC.norm();
 

@@ -40,6 +40,17 @@ namespace ORB_SLAM3
     {
     }
 
+    /**
+     * @brief 更新局部地图时使用
+     * @param F [in]
+     * @param vpMapPoints [in]
+     * @param th [in]
+     * @param bFarPoints [in]
+     * @param thFarPoints [in]
+     * 1. 遍历vpMapPoints，投影到当前帧，找到附近的ORB描述子最匹配的特征点
+     * 2. 把该特征点对应的MapPoint更新为局部特征点里的MapPoint
+     *      这里修改了当前帧的MapPoint,或许是因为局部特征里是经过优化的，比较准？
+     */
     int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoints, const float th, const bool bFarPoints, const float thFarPoints)
     {
         int nmatches=0, left = 0, right = 0;
@@ -904,9 +915,18 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    /**
+     * @brief 通过两个有共视关系的关键帧，三角化得到地图点
+     * 1. 计算一些变换矩阵
+     * 2. 两帧中找到相同的词汇，遍历该词汇对应的描述子，
+     *      如果该描述子已经存在对应的地图点，跳过
+     *      如果
+     * 3. 输出 vMatchedPairs
+     */
     int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
                                            vector<pair<size_t, size_t> > &vMatchedPairs, const bool bOnlyStereo, const bool bCoarse)
     {
+        // KF1,KF2的特征向量
         const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
         const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
 
@@ -915,9 +935,9 @@ namespace ORB_SLAM3
         Sophus::SE3f T2w = pKF2->GetPose();
         Sophus::SE3f Tw2 = pKF2->GetPoseInverse(); // for convenience
         Eigen::Vector3f Cw = pKF1->GetCameraCenter();
-        Eigen::Vector3f C2 = T2w * Cw;
+        Eigen::Vector3f C2 = T2w * Cw;// c1在T2w里的坐标
 
-        Eigen::Vector2f ep = pKF2->mpCamera->project(C2);
+        Eigen::Vector2f ep = pKF2->mpCamera->project(C2);// c1在KF2里的像素坐标，极点
         Sophus::SE3f T12;
         Sophus::SE3f Tll, Tlr, Trl, Trr;
         Eigen::Matrix3f R12; // for fastest computation
@@ -959,15 +979,17 @@ namespace ORB_SLAM3
         DBoW2::FeatureVector::const_iterator f2it = vFeatVec2.begin();
         DBoW2::FeatureVector::const_iterator f1end = vFeatVec1.end();
         DBoW2::FeatureVector::const_iterator f2end = vFeatVec2.end();
-
+        // vFeatVec1 这东西其实是一个 std::map<NodeId, std::vector<unsigned int> >
         while(f1it!=f1end && f2it!=f2end)
         {
+            // 找到两帧里相同的词汇了
             if(f1it->first == f2it->first)
             {
+                // 遍历翻译成这个词汇的所有描述子(可能有很多描述子都解释成这个词汇)
                 for(size_t i1=0, iend1=f1it->second.size(); i1<iend1; i1++)
                 {
                     const size_t idx1 = f1it->second[i1];
-
+                    // 地图点
                     MapPoint* pMP1 = pKF1->GetMapPoint(idx1);
 
                     // If there is already a MapPoint skip
@@ -976,24 +998,27 @@ namespace ORB_SLAM3
                         continue;
                     }
 
+                    // true
                     const bool bStereo1 = (!pKF1->mpCamera2 && pKF1->mvuRight[idx1]>=0);
 
                     if(bOnlyStereo)
                         if(!bStereo1)
                             continue;
 
+                    // 这点对应的特征点
                     const cv::KeyPoint &kp1 = (pKF1 -> NLeft == -1) ? pKF1->mvKeysUn[idx1]
                                                                     : (idx1 < pKF1 -> NLeft) ? pKF1 -> mvKeys[idx1]
                                                                                              : pKF1 -> mvKeysRight[idx1 - pKF1 -> NLeft];
 
                     const bool bRight1 = (pKF1 -> NLeft == -1 || idx1 < pKF1 -> NLeft) ? false
                                                                                        : true;
-
+                    // 这点对应的描述子
                     const cv::Mat &d1 = pKF1->mDescriptors.row(idx1);
 
                     int bestDist = TH_LOW;
                     int bestIdx2 = -1;
-
+                    
+                    // 遍历KF2里对应的所有描述子
                     for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
                     {
                         size_t idx2 = f2it->second[i2];
@@ -1010,13 +1035,15 @@ namespace ORB_SLAM3
                             if(!bStereo2)
                                 continue;
 
+                        // KF2里的描述子
                         const cv::Mat &d2 = pKF2->mDescriptors.row(idx2);
-
+                        
                         const int dist = DescriptorDistance(d1,d2);
 
                         if(dist>TH_LOW || dist>bestDist)
                             continue;
 
+                        // 找到对应KF2里的特征点
                         const cv::KeyPoint &kp2 = (pKF2 -> NLeft == -1) ? pKF2->mvKeysUn[idx2]
                                                                         : (idx2 < pKF2 -> NLeft) ? pKF2 -> mvKeys[idx2]
                                                                                                  : pKF2 -> mvKeysRight[idx2 - pKF2 -> NLeft];
@@ -1032,7 +1059,8 @@ namespace ORB_SLAM3
                                 continue;
                             }
                         }
-
+                        
+                        // 双目相机的时候进这里
                         if(pKF1->mpCamera2 && pKF2->mpCamera2){
                             if(bRight1 && bRight2){
                                 R12 = Rrr;
@@ -1068,7 +1096,7 @@ namespace ORB_SLAM3
                             }
 
                         }
-
+                        // 如果满足极线条件，则匹配成功
                         if(bCoarse || pCamera1->epipolarConstrain(pCamera2,kp1,kp2,R12,t12,pKF1->mvLevelSigma2[kp1.octave],pKF2->mvLevelSigma2[kp2.octave])) // MODIFICATION_2
                         {
                             bestIdx2 = idx2;
@@ -1081,6 +1109,7 @@ namespace ORB_SLAM3
                         const cv::KeyPoint &kp2 = (pKF2 -> NLeft == -1) ? pKF2->mvKeysUn[bestIdx2]
                                                                         : (bestIdx2 < pKF2 -> NLeft) ? pKF2 -> mvKeys[bestIdx2]
                                                                                                      : pKF2 -> mvKeysRight[bestIdx2 - pKF2 -> NLeft];
+                        // kp1对应那个kp2
                         vMatches12[idx1]=bestIdx2;
                         nmatches++;
 
@@ -1101,6 +1130,7 @@ namespace ORB_SLAM3
                 f1it++;
                 f2it++;
             }
+            // 如果不是同一个，那么二分法去找到相同
             else if(f1it->first < f2it->first)
             {
                 f1it = vFeatVec1.lower_bound(f2it->first);

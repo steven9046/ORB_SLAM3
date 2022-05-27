@@ -104,6 +104,13 @@ namespace ORB_SLAM3
 
 
     const float factorPI = (float)(CV_PI/180.f);
+    /**
+     * @brief 
+     * @param [in]  kpt      关键点坐标(以次为中心计算16x16范围内的描述子)
+     * @param [in]  img      输入图像(金字塔的一层)
+     * @param [in]  pattern  固定的pattern的起始地址
+     * @param [out] desc     输出描述子，32个int长度
+     */
     static void computeOrbDescriptor(const KeyPoint& kpt,
                                      const Mat& img, const Point* pattern,
                                      uchar* desc)
@@ -113,19 +120,19 @@ namespace ORB_SLAM3
 
         const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
         const int step = (int)img.step;
-
+// 获取点对编码函数，某两个特殊位置像素点的灰度比较大小，为一位编码
 #define GET_VALUE(idx) \
         center[cvRound(pattern[idx].x*b + pattern[idx].y*a)*step + \
                cvRound(pattern[idx].x*a - pattern[idx].y*b)]
 
-
+        // 算8个点对的编码，循环32次，共256个点对
         for (int i = 0; i < 32; ++i, pattern += 16)
         {
             int t0, t1, val;
             t0 = GET_VALUE(0); t1 = GET_VALUE(1);
             val = t0 < t1;
             t0 = GET_VALUE(2); t1 = GET_VALUE(3);
-            val |= (t0 < t1) << 1;
+            val |= (t0 < t1) << 1;  // 位移+按位或，就是变长，正好一个Int 8位编码
             t0 = GET_VALUE(4); t1 = GET_VALUE(5);
             val |= (t0 < t1) << 2;
             t0 = GET_VALUE(6); t1 = GET_VALUE(7);
@@ -145,7 +152,10 @@ namespace ORB_SLAM3
 #undef GET_VALUE
     }
 
-
+    /**
+     * @brief 计算brief描述子的pattern
+     * 在r=16的圆形区域，取256对点(P1,P2),比较灰度，进行编码，形成描述子
+     */
     static int bit_pattern_31_[256*4] =
             {
                     8,-3, 9,5/*mean (0), correlation (0)*/,
@@ -406,11 +416,19 @@ namespace ORB_SLAM3
                     -1,-6, 0,-11/*mean (0.127148), correlation (0.547401)*/
             };
 
+    /**
+     * @brief 
+     * 1. 构建尺度金字塔，按照面积分配各层要提取的特征点数量
+     * 2. pattern (用于计算brief描述子的坐标)格式转换
+     * 3. 灰度质心圆形区域索引计算
+     * 
+     */
     ORBextractor::ORBextractor(int _nfeatures, float _scaleFactor, int _nlevels,
                                int _iniThFAST, int _minThFAST):
             nfeatures(_nfeatures), scaleFactor(_scaleFactor), nlevels(_nlevels),
             iniThFAST(_iniThFAST), minThFAST(_minThFAST)
     {
+        // 计算尺度参数
         mvScaleFactor.resize(nlevels);
         mvLevelSigma2.resize(nlevels);
         mvScaleFactor[0]=1.0f;
@@ -431,10 +449,12 @@ namespace ORB_SLAM3
 
         mvImagePyramid.resize(nlevels);
 
+        // 按照面积分配每个尺度上想要提取的特征点数量
         mnFeaturesPerLevel.resize(nlevels);
         float factor = 1.0f / scaleFactor;
+        // 第0层的特征点数量，这个是按照 (总特征点数/金字塔总面积)*当前层金子塔面积 算出来的
         float nDesiredFeaturesPerScale = nfeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nlevels));
-
+        // 求各层金字塔要提取的特征
         int sumFeatures = 0;
         for( int level = 0; level < nlevels-1; level++ )
         {
@@ -443,22 +463,28 @@ namespace ORB_SLAM3
             nDesiredFeaturesPerScale *= factor;
         }
         mnFeaturesPerLevel[nlevels-1] = std::max(nfeatures - sumFeatures, 0);
-
-        const int npoints = 512;
+        
+        // 把bit_pattern改成cvPoint格式，放到pattern容器里
+        const int npoints = 512;// 256对点共512个
         const Point* pattern0 = (const Point*)bit_pattern_31_;
         std::copy(pattern0, pattern0 + npoints, std::back_inserter(pattern));
 
+        // 计算灰度质心需要一个圆形patch,这里先把这个圆形patch的边界像素相对坐标计算出来
         //This is for orientation
         // pre-compute the end of a row in a circular patch
-        umax.resize(HALF_PATCH_SIZE + 1);
-
-        int v, v0, vmax = cvFloor(HALF_PATCH_SIZE * sqrt(2.f) / 2 + 1);
-        int vmin = cvCeil(HALF_PATCH_SIZE * sqrt(2.f) / 2);
+        // 因为对称，所以计算一半就行了
+        umax.resize(HALF_PATCH_SIZE + 1); // 这是横坐标的最大值
+        
+        // 再分成1/8圆计算
+        int v, v0, vmax = cvFloor(HALF_PATCH_SIZE * sqrt(2.f) / 2 + 1);//纵坐标的最大值 = 12
+        int vmin = cvCeil(HALF_PATCH_SIZE * sqrt(2.f) / 2); // 11
         const double hp2 = HALF_PATCH_SIZE*HALF_PATCH_SIZE;
+        // umax[0] ~ umax[12] 对应的横坐标
         for (v = 0; v <= vmax; ++v)
             umax[v] = cvRound(sqrt(hp2 - v * v));
 
         // Make sure we are symmetric
+        // umax[15] ~ umax[11] 对应的横坐标
         for (v = HALF_PATCH_SIZE, v0 = 0; v >= vmin; --v)
         {
             while (umax[v0] == umax[v0 + 1])
@@ -553,8 +579,9 @@ namespace ORB_SLAM3
     }
 
     /**
-     * @brief 
-     * 
+     * @brief 通过四叉树分发特征点
+     * 因为如果每个像素都记录有没有特征点会很耗时，这里弄成四叉树，可以快速索引特征点
+     * 一层一层分，分到数量够了为止，这时可能一个Node里还是有多个特征点，选取响应值最大的作为最终的特征点
      */
     vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                                          const int &maxX, const int &minY, const int &maxY, const int &N, const int &level)
@@ -880,7 +907,7 @@ namespace ORB_SLAM3
                         }*/
                     }
 
-                    // 如果检测到了角点，把角点在cell中的坐标恢复为图像中的坐标
+                    // 如果检测到了角点，把角点在cell中的坐标恢复为该层金字塔中的坐标
                     // 存到 vToDistributeKeys 里
                     if(!vKeysCell.empty())
                     {

@@ -43,7 +43,10 @@ class KeyFrame;
 class Frame;
 class Map;
 
-
+/**
+ * @brief 用来重定位和回环检测
+ * 
+ */
 class KeyFrameDatabase
 {
     friend class boost::serialization::access;

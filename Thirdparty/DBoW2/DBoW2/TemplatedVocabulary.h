@@ -1123,6 +1123,13 @@ void TemplatedVocabulary<TDescriptor,F>::transform(
 
 // --------------------------------------------------------------------------
 
+/**
+ * @brief 将描述子进行聚类，从而得到词汇向量v,和特征向量fv
+ * @param [in]  features    传入特征
+ * @param [out] v           词汇向量    同一个词汇出现多次时 value 相加
+ * @param [out] fv          特征向量    同一个 node id 出现多次时，描述子的id都存到vector里
+ * @param [in]  levelsup    词汇树深度
+ */
 template<class TDescriptor, class F> 
 void TemplatedVocabulary<TDescriptor,F>::transform(
   const std::vector<TDescriptor>& features,
@@ -1142,21 +1149,24 @@ void TemplatedVocabulary<TDescriptor,F>::transform(
   
   typename vector<TDescriptor>::const_iterator fit;
   
+  // 默认距离 TF_IDF
   if(m_weighting == TF || m_weighting == TF_IDF)
   {
     unsigned int i_feature = 0;
+    // 遍历所有feature
     for(fit = features.begin(); fit < features.end(); ++fit, ++i_feature)
     {
       WordId id;
       NodeId nid;
       WordValue w; 
       // w is the idf value if TF_IDF, 1 if TF
-      
       transform(*fit, id, w, &nid, levelsup);
       
       if(w > 0) // not stopped
       { 
+        // world id 和 值
         v.addWeight(id, w);
+        // node id 和 是传入描述子里的第几个
         fv.addFeature(nid, i_feature);
       }
     }
@@ -1214,6 +1224,14 @@ void TemplatedVocabulary<TDescriptor,F>::transform
 
 // --------------------------------------------------------------------------
 
+/**
+ * @brief 底层转换函数
+ * @param [in]  feature     待转换特征
+ * @param [out] word_id     分配到的词汇id
+ * @param [out] weight      分配到的词汇权重
+ * @param [out] nid         词汇树中节点id
+ * @param [in]  levelsup    最深搜索到第几层 (4)
+ */
 template<class TDescriptor, class F>
 void TemplatedVocabulary<TDescriptor,F>::transform(const TDescriptor &feature, 
   WordId &word_id, WordValue &weight, NodeId *nid, int levelsup) const
@@ -1229,6 +1247,8 @@ void TemplatedVocabulary<TDescriptor,F>::transform(const TDescriptor &feature,
   NodeId final_id = 0; // root
   int current_level = 0;
 
+  // 从父节点出发，找到每层里和传入特征最匹配的节点，直到到达设定层数
+  // 获得最匹配的节点，输出改节点在tree里的Node id, 该节点对应world的id,权重
   do
   {
     ++current_level;
@@ -1236,7 +1256,7 @@ void TemplatedVocabulary<TDescriptor,F>::transform(const TDescriptor &feature,
     final_id = nodes[0];
  
     double best_d = F::distance(feature, m_nodes[final_id].descriptor);
-
+    
     for(nit = nodes.begin() + 1; nit != nodes.end(); ++nit)
     {
       NodeId id = *nit;

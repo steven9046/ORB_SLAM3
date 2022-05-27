@@ -103,7 +103,15 @@ namespace ORB_SLAM3 {
         return K;
     }
 
-
+    /**
+     * @brief 极线约束
+     * @param [in] pCamera2     相机参数
+     * @param [in] kp1          Frame1里的点
+     * @param [in] kp2          Frame2里的点
+     * @param [in] R12          旋转矩阵
+     * @param [in] t12          平移矩阵
+     * @param [in] sigmaLevel   尺度
+     */
     bool Pinhole::epipolarConstrain(GeometricCamera* pCamera2,  const cv::KeyPoint &kp1, const cv::KeyPoint &kp2, const Eigen::Matrix3f& R12, const Eigen::Vector3f& t12, const float sigmaLevel, const float unc) {
         //Compute Fundamental Matrix
         Eigen::Matrix3f t12x = Sophus::SO3f::hat(t12);

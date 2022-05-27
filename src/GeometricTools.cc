@@ -44,6 +44,14 @@ Eigen::Matrix3f GeometricTools::ComputeF12(KeyFrame* &pKF1, KeyFrame* &pKF2)
     return K1.transpose().inverse() * tc1c2x * Rc1c2 * K2.inverse();
 }
 
+/**
+ * @brief 
+ * @param [in]  x_c1    Frame1 里对应的 地图点3D坐标
+ * @param [in]  x_c2    Frame2 里对应的 地图点3D坐标
+ * @param [in]  Tc1w    Frame1 的世界坐标
+ * @param [in]  Tc2w    Frame2 的世界坐标
+ * @param [out] x3D     输出地图点3D坐标
+ */
 bool GeometricTools::Triangulate(Eigen::Vector3f &x_c1, Eigen::Vector3f &x_c2,Eigen::Matrix<float,3,4> &Tc1w ,Eigen::Matrix<float,3,4> &Tc2w , Eigen::Vector3f &x3D)
 {
     Eigen::Matrix4f A;

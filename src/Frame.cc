@@ -199,9 +199,18 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
 /**
  * @brief  RGBD Frame 构造函数
- * 1. Frame ID
+ * @param [in]  imGray      灰度图像(RGB图像)
+ * @param [in]  imDepth     深度图像
+ * @param [in]  extractor   特征提取
+ * @param [in]  K           内参
+ * @param [in]  distCoef    畸变参数
+ * @param [in]  bf          基线 * fx
+ * @param [in]  thDepth     判断一个点是远还是近的阈值
+ * @param [in]  pPrevF      前一帧
+ * 1. 记录 Frame ID
  * 2. 提取ORB特征放入 mDescriptors
- * 3. 
+ * 3. 初始化相机内参，畸变矫正
+ * 4. 把特征分配到Grid里
  */
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
@@ -529,7 +538,9 @@ Eigen::Vector3f Frame::GetRelativePoseTlr_translation() {
     return mTlr.translation();
 }
 
-
+/**
+ * @brief 查看地图点是否可以投影到当前帧里
+ */
 bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
 {
     if(Nleft == -1){
@@ -760,11 +771,17 @@ void Frame::ComputeBoW()
 {
     if(mBowVec.empty())
     {
+        // 把一个大的Mat,的每一行拿出来，做成一个Vector
         vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);
+        // 
         mpORBvocabulary->transform(vCurrentDesc,mBowVec,mFeatVec,4);
     }
 }
 
+/**
+ * @brief OpenCV去畸变
+ * 只对keyPoint进行去畸变,减少计算量
+ */
 void Frame::UndistortKeyPoints()
 {
     if(mDistCoef.at<float>(0)==0.0)
@@ -1002,7 +1019,10 @@ void Frame::ComputeStereoMatches()
     }
 }
 
-
+/**
+ * @brief 
+ * 从RGBD,还原出一个双目数据，虚拟了一个右目相机,最后的公式就是最基本的相机模型推出来的 
+ */
 void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
 {
     mvuRight = vector<float>(N,-1);
@@ -1026,6 +1046,9 @@ void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
     }
 }
 
+/**
+ * @brief tracking 时调用，生成3D地图点 
+ */
 bool Frame::UnprojectStereo(const int &i, Eigen::Vector3f &x3D)
 {
     const float z = mvDepth[i];

@@ -27,6 +27,11 @@
 #include<mutex>
 #include<chrono>
 
+/**
+ * @brief 局部地图线程，主函数是run
+ * 
+ */
+
 namespace ORB_SLAM3
 {
 
@@ -61,6 +66,14 @@ void LocalMapping::SetTracker(Tracking *pTracker)
     mpTracker=pTracker;
 }
 
+/**
+ * @brief 主函数
+ * 1. 处理关键帧，把这个关键帧的地图点加入到 mlpRecentAddedMapPoints 里
+ * 2. 遍历 mlpRecentAddedMapPoints 里的地图点，剔除不够好的
+ * 3. 从共视关键帧里通过匹配，三角化，得到一些原来没有的地图点
+ * 4. 查找更多的共视关键帧，补地图点
+ * 5. 
+ */
 void LocalMapping::Run()
 {
     mbFinished = false;
@@ -121,6 +134,7 @@ void LocalMapping::Run()
             int num_MPs_BA = 0;
             int num_edges_BA = 0;
 
+            // 5. 进行局部的BA
             if(!CheckNewKeyFrames() && !stopRequested())
             {
                 if(mpAtlas->KeyFramesInMap()>2)
@@ -295,6 +309,13 @@ bool LocalMapping::CheckNewKeyFrames()
     return(!mlNewKeyFrames.empty());
 }
 
+/**
+ * @brief 处理关键帧，拿出list里的首项keyFrame
+ * 1. 计算BoW
+ * 2. 拿出当前关键帧的地图点，更新这些地图点的数据
+ * 3. 当前关键帧更新共视关系
+ * 4. 把KeyFrame加入到地图里
+ */
 void LocalMapping::ProcessNewKeyFrame()
 {
     {
@@ -306,6 +327,7 @@ void LocalMapping::ProcessNewKeyFrame()
     // Compute Bags of Words structures
     mpCurrentKeyFrame->ComputeBoW();
 
+    // 当前关键帧的地图点
     // Associate MapPoints to the new keyframe and update normal and descriptor
     const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
 
@@ -316,12 +338,17 @@ void LocalMapping::ProcessNewKeyFrame()
         {
             if(!pMP->isBad())
             {
+                // 如果这个地图点没有被当前关键帧观测到过
                 if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
                 {
+                    // 添加观测
                     pMP->AddObservation(mpCurrentKeyFrame, i);
+                    // 更新平均观测方向以及观测距离范围
                     pMP->UpdateNormalAndDepth();
+                    // 更新描述子
                     pMP->ComputeDistinctiveDescriptors();
                 }
+                // 如果被当前帧观测到了,就把地图点加到"新增地图点"中
                 else // this can only happen for new stereo points inserted by the Tracking
                 {
                     mlpRecentAddedMapPoints.push_back(pMP);
@@ -331,6 +358,7 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Update links in the Covisibility Graph
+    // 这里就是更新共视关系
     mpCurrentKeyFrame->UpdateConnections();
 
     // Insert Keyframe in Map
@@ -343,6 +371,10 @@ void LocalMapping::EmptyQueue()
         ProcessNewKeyFrame();
 }
 
+/**
+ * @brief 处理 mlpRecentAddedMapPoints 中的地图点(上一步加进来的地图点)
+ * 
+ */
 void LocalMapping::MapPointCulling()
 {
     // Check Recent Added MapPoints
@@ -357,23 +389,26 @@ void LocalMapping::MapPointCulling()
     const int cnThObs = nThObs;
 
     int borrar = mlpRecentAddedMapPoints.size();
-
+    
     while(lit!=mlpRecentAddedMapPoints.end())
     {
         MapPoint* pMP = *lit;
-
+        // 如果该点是坏的，直接删除
         if(pMP->isBad())
             lit = mlpRecentAddedMapPoints.erase(lit);
+        // 如果改点的观测率小于阈值，删除
         else if(pMP->GetFoundRatio()<0.25f)
         {
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
+        // 如果
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->Observations()<=cnThObs)
         {
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
+        // 如果
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
             lit = mlpRecentAddedMapPoints.erase(lit);
         else
@@ -384,7 +419,12 @@ void LocalMapping::MapPointCulling()
     }
 }
 
-
+/**
+ * @brief 创建新的地图点
+ * 1. 拿出10帧共视关系最强的关键帧,分别与当前帧进行对比
+ * 2. 通过ORB特征得到匹配的关键点
+ * 3. 三角化得到新的地图点
+ */
 void LocalMapping::CreateNewMapPoints()
 {
     // Retrieve neighbor keyframes in covisibility graph
@@ -410,7 +450,7 @@ void LocalMapping::CreateNewMapPoints()
     float th = 0.6f;
 
     ORBmatcher matcher(th,false);
-
+ 
     Sophus::SE3<float> sophTcw1 = mpCurrentKeyFrame->GetPose();
     Eigen::Matrix<float,3,4> eigTcw1 = sophTcw1.matrix3x4();
     Eigen::Matrix<float,3,3> Rcw1 = eigTcw1.block<3,3>(0,0);
@@ -431,15 +471,16 @@ void LocalMapping::CreateNewMapPoints()
     int countStereoAttempt = 0;
     int totalStereoPts = 0;
     // Search matches with epipolar restriction and triangulate
-    for(size_t i=0; i<vpNeighKFs.size(); i++)
+    for(size_t i=0; i<vpNeighKFs.size(); i++) // 遍历帧
     {
         if(i>0 && CheckNewKeyFrames())
             return;
 
         KeyFrame* pKF2 = vpNeighKFs[i];
-
+        // 当前帧的相机， 共视关键帧的相机 (其实是同一个)
         GeometricCamera* pCamera1 = mpCurrentKeyFrame->mpCamera, *pCamera2 = pKF2->mpCamera;
-
+        
+        // 这里是要用两帧来三角化地图点
         // Check first that baseline is not too short
         Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
         Eigen::Vector3f vBaseline = Ow2-Ow1;
@@ -463,6 +504,7 @@ void LocalMapping::CreateNewMapPoints()
         vector<pair<size_t,size_t> > vMatchedIndices;
         bool bCoarse = mbInertial && mpTracker->mState==Tracking::RECENTLY_LOST && mpCurrentKeyFrame->GetMap()->GetIniertialBA2();
 
+        // 特征匹配得到 vMatchedIndices <KF1里特征点的id, 匹配到的KF2里特征点的id>
         matcher.SearchForTriangulation(mpCurrentKeyFrame,pKF2,vMatchedIndices,false,bCoarse);
 
         Sophus::SE3<float> sophTcw2 = pKF2->GetPose();

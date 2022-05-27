@@ -42,6 +42,15 @@ KeyFrame::KeyFrame():
 
 }
 
+/**
+ * @brief Construct a new Key Frame:: Key Frame object
+ * @param F       [in]  
+ * @param pMap    [in]
+ * @param pKFDB   [in]
+ * 1. 把Frame里的分配好的KeyPoint都复制过来
+ * 2. 把Frame的位姿复制过来
+ * 3. 把地图连接上
+ */
 KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     bImu(pMap->isImuInitialized()), mnFrameId(F.mnId),  mTimeStamp(F.mTimeStamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
     mfGridElementWidthInv(F.mfGridElementWidthInv), mfGridElementHeightInv(F.mfGridElementHeightInv),
@@ -63,6 +72,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
 {
     mnId=nNextId++;
 
+    /** 1.复制特征点 **/
     mGrid.resize(mnGridCols);
     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
     for(int i=0; i<mnGridCols;i++)
@@ -90,8 +100,9 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     }
 
     mImuBias = F.mImuBias;
+    /** 2.设置位姿 **/
     SetPose(F.GetPose());
-
+    /** 3.连接地图 **/
     mnOriginMapId = pMap->GetId();
 }
 
@@ -186,6 +197,10 @@ bool KeyFrame::isVelocitySet()
     return mbHasVelocity;
 }
 
+/**
+ * @brief 更新 std::map<KeyFrame*,int> mConnectedKeyFrameWeights;
+ * 存的是共视关系
+ */
 void KeyFrame::AddConnection(KeyFrame *pKF, const int &weight)
 {
     {
@@ -201,6 +216,10 @@ void KeyFrame::AddConnection(KeyFrame *pKF, const int &weight)
     UpdateBestCovisibles();
 }
 
+/**
+ * @brief 共视关系变了，要更新这个
+ * 就是按照共视关系排序
+ */
 void KeyFrame::UpdateBestCovisibles()
 {
     unique_lock<mutex> lock(mMutexConnections);
@@ -209,6 +228,7 @@ void KeyFrame::UpdateBestCovisibles()
     for(map<KeyFrame*,int>::iterator mit=mConnectedKeyFrameWeights.begin(), mend=mConnectedKeyFrameWeights.end(); mit!=mend; mit++)
        vPairs.push_back(make_pair(mit->second,mit->first));
 
+    // 排序
     sort(vPairs.begin(),vPairs.end());
     list<KeyFrame*> lKFs;
     list<int> lWs;
@@ -376,9 +396,14 @@ MapPoint* KeyFrame::GetMapPoint(const size_t &idx)
     return mvpMapPoints[idx];
 }
 
+/**
+ * @brief 更新连接关系
+ * 
+ */
 void KeyFrame::UpdateConnections(bool upParent)
 {
-    map<KeyFrame*,int> KFcounter;
+    //  关键帧   观测次数
+    map<KeyFrame*,int> KFcounter; // 记录其他KeyFrame观测到了当前KeyFrame的地图点的数量
 
     vector<MapPoint*> vpMP;
 
@@ -420,6 +445,7 @@ void KeyFrame::UpdateConnections(bool upParent)
     KeyFrame* pKFmax=NULL;
     int th = 15;
 
+    //      权重(共视点数量)  共视关键帧
     vector<pair<int,KeyFrame*> > vPairs;
     vPairs.reserve(KFcounter.size());
     if(!upParent)
@@ -428,6 +454,7 @@ void KeyFrame::UpdateConnections(bool upParent)
     {
         if(!upParent)
             cout << "  UPDATE_CONN: KF " << mit->first->mnId << " ; num matches: " << mit->second << endl;
+        // 记录下共视关系最强的
         if(mit->second>nmax)
         {
             nmax=mit->second;
@@ -436,7 +463,7 @@ void KeyFrame::UpdateConnections(bool upParent)
         if(mit->second>=th)
         {
             vPairs.push_back(make_pair(mit->second,mit->first));
-            (mit->first)->AddConnection(this,mit->second);
+            (mit->first)->AddConnection(this,mit->second); // 更新共视帧的共视关系
         }
     }
 
@@ -446,9 +473,10 @@ void KeyFrame::UpdateConnections(bool upParent)
         pKFmax->AddConnection(this,nmax);
     }
 
+    // 更新当前帧的共视关系
     sort(vPairs.begin(),vPairs.end());
-    list<KeyFrame*> lKFs;
-    list<int> lWs;
+    list<KeyFrame*> lKFs; // 关键帧
+    list<int> lWs; // 权重
     for(size_t i=0; i<vPairs.size();i++)
     {
         lKFs.push_front(vPairs[i].second);
@@ -570,6 +598,10 @@ void KeyFrame::SetErase()
     }
 }
 
+/**
+ * @brief spanning tree 核心函数
+ * 只有上边那个函数会调用，上边那个函数只有回环检测时会调用
+ */
 void KeyFrame::SetBadFlag()
 {
     {

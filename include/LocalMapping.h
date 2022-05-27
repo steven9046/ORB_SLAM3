@@ -161,6 +161,7 @@ protected:
     LoopClosing* mpLoopCloser;
     Tracking* mpTracker;
 
+    // 
     std::list<KeyFrame*> mlNewKeyFrames;
 
     KeyFrame* mpCurrentKeyFrame;

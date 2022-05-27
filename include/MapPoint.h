@@ -30,6 +30,7 @@
 #include <opencv2/core/core.hpp>
 #include <mutex>
 
+// 序列化应该是为了保存地图
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/map.hpp>
@@ -161,11 +162,11 @@ public:
     void PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid);
 
 public:
-    long unsigned int mnId;
-    static long unsigned int nNextId;
-    long int mnFirstKFid;
-    long int mnFirstFrame;
-    int nObs;
+    long unsigned int mnId; // 当前帧id
+    static long unsigned int nNextId; // 用来计数的
+    long int mnFirstKFid; // 第一个看到这个地图点的关键帧的id
+    long int mnFirstFrame; // 第一个看到这个地图点的帧的id
+    int nObs; // 被观测次数
 
     // Variables used by the tracking
     float mTrackProjX;

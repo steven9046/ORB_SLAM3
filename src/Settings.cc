@@ -241,7 +241,7 @@ namespace ORB_SLAM3 {
 
             //Check if we need to correct distortion from the images
             if((sensor_ == System::MONOCULAR || sensor_ == System::IMU_MONOCULAR) && vPinHoleDistorsion1_.size() != 0){
-                bNeedT++oUndistort_ = true;
+                bNeedToUndistort_ = true;
             }
         }
         else if(cameraModel == "Rectified"){

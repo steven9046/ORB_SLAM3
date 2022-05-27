@@ -51,6 +51,7 @@ class GeometricCamera;
 
 class KeyFrame
 {
+    // 这样序列化类就可以调用所有KeyFrame的成员变量(包括私有)
     friend class boost::serialization::access;
 
     template<class Archive>
@@ -314,6 +315,7 @@ public:
 
     const double mTimeStamp;
 
+    // 这都是固定值，和Frame里的一样
     // Grid (to speed up feature matching)
     const int mnGridCols;
     const int mnGridRows;
